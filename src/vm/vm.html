@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Browser VM</title>
+<!-- Adds COOP/COEP for static hosts (no-op once isolated). coepCredentialless off for Safari. -->
+<script>window.coi = { coepCredentialless: () => false };</script>
+<script src="coi-serviceworker.js"></script>
+<style>
+  html { color-scheme: dark; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #0f1115; }
+  #desktop { position: absolute; inset: 0; }
+  /* Mobile mode: a phone-sized screen, so pages lay out as on a phone. */
+  #desktop.phone { inset: 8px auto 8px 50%; width: min(390px, 100% - 16px); max-height: 844px; translate: -50%;
+                   outline: 1px solid #30363d; border-radius: 12px; overflow: hidden; }
+  #boot { position: absolute; inset: 0; z-index: 10; display: flex; flex-direction: column; background: #0f1115;
+          font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: #c9d1d9; }
+  #boot[hidden] { display: none; }
+  #progress { flex: none; height: 3px; background: #21262d; }
+  #progress > div { height: 100%; width: 0; background: #58a6ff; transition: width 0.4s ease-out; }
+  #boot.error #progress > div { background: #f85149; }
+  #log { flex: 1; margin: 0; padding: 10px 12px; overflow-y: auto; scrollbar-width: thin; scrollbar-color: #30363d transparent; white-space: pre-wrap; overflow-wrap: anywhere; }
+  #log .time { display: inline-block; min-width: 6ch; margin-right: 2ch; text-align: right; color: #6e7681; }
+  #log .ok, #log .guest { color: #8b949e; }
+  #log .err { color: #f85149; }
+  #log .step { color: #e6edf3; font-weight: 600; }
+</style>
+</head>
+<body>
+<div id="desktop"></div>
+<div id="boot">
+  <div id="progress" role="progressbar" aria-label="Starting the browser" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div></div></div>
+  <pre id="log" role="log"></pre>
+</div>
+<script type="module" src="vm/main.js"></script>
+</body>
+</html>

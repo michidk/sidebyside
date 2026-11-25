@@ -1,0 +1,9 @@
+node_modules/
+# Built by `bun run build`
+public/vendor/
+public/vm/
+public/vm.html
+public/coi-serviceworker.js
+dist/
+.output/
+.tanstack/
