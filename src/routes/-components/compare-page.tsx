@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { BROWSERS, type Browser } from "@/modules/browsers/browsers";
-import type { MobileMessage } from "@/modules/vm-frame/messages";
+import type { MobileMessage, NavigateMessage } from "@/modules/vm-frame/messages";
 import { useConsoleLog } from "../-hooks/use-console-log";
 import { useUsage } from "../-hooks/use-usage";
 import { frameSrc, type Run } from "../-lib/frame";
@@ -64,16 +64,23 @@ export function ComparePage() {
     }
     if (!URL.canParse(url)) return;
     const target = new URL(url).href;
-    setRun((old) => ({
-      id: (old?.id ?? 0) + 1,
-      url: target,
+    const vms = {
       mem: settings.mem,
       relays: relays.value,
       // A hidden browser's malformed flags fall back to its defaults if it's added later.
       flags: Object.fromEntries(flags.map(([b, f]) => [b.id, f.ok ? f.value : b.flags.defaults])),
-    }));
-    setPanes({});
+    };
     update({ url: target, ...settingsSearch(settings, relays.value, BROWSERS) });
+    // A new URL for the same VMs: the running browsers open it. Otherwise (other settings, or Open
+    // again on the same URL) every VM starts over.
+    if (run && target !== run.url && JSON.stringify(vms) === JSON.stringify({ mem: run.mem, relays: run.relays, flags: run.flags })) {
+      setRun({ ...run, url: target });
+      for (const frame of frames.current.values())
+        frame.contentWindow?.postMessage({ type: "navigate", url: target } satisfies NavigateMessage, location.origin);
+      return;
+    }
+    setRun((old) => ({ id: (old?.id ?? 0) + 1, url: target, ...vms }));
+    setPanes({});
   }
 
   // A link with a URL opens it right away.

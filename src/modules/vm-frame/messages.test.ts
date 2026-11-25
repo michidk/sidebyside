@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { parseConsole, parseMobile, parseUsage } from "./messages.ts";
+import { parseConsole, parseMobile, parseNavigate, parseUsage } from "./messages.ts";
 
 const usage = { type: "usage", browser: "chromium", cpu: 0.4, cpus: 4, memUsed: 1, memTotal: 2, rx: 0, tx: 0 };
 
@@ -24,4 +24,10 @@ test("mobile switches are booleans", () => {
   expect(parseMobile({ type: "mobile", on: true })).toEqual({ type: "mobile", on: true });
   expect(parseMobile({ type: "mobile", on: "yes" })?.on).toBe(false);
   expect(parseMobile({ type: "usage" })).toBeUndefined();
+});
+
+test("navigation takes only a URL", () => {
+  expect(parseNavigate({ type: "navigate", url: "https://example.com/" })).toEqual({ type: "navigate", url: "https://example.com/" });
+  expect(parseNavigate({ type: "navigate", url: "not a url" })).toBeUndefined();
+  expect(parseNavigate({ type: "navigate", url: 1 })).toBeUndefined();
 });

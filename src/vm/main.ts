@@ -1,10 +1,12 @@
 // One VM: boot unkernel, mount the browser's closure at /nix/store, start the Wayland relay,
 // and launch the browser on the page's URL.
 // vm.html?browser=<id>&url=<url>[&mem=MiB][&cpus=1-4][&wisp=wss://…][&flags=one per line][&mobile=1]
-// The page may later post { type: "mobile", on } to switch mobile mode without a reboot.
+// The page may later post { type: "mobile", on } or { type: "navigate", url }: the running browser
+// follows without a reboot (see apply() in main()).
 import type * as Unkernel from "unkernel";
 import { BROWSERS, DEFAULT_RELAYS, flagError, flagLines, type Browser } from "../modules/browsers/browsers.ts";
-import { parseMobile, type ConsoleMessage, type UsageMessage } from "../modules/vm-frame/messages.ts";
+import { parseMobile, parseNavigate, type ConsoleMessage, type UsageMessage } from "../modules/vm-frame/messages.ts";
+import { connectControl, type Control } from "./control.ts";
 import { attachDesktop, sessionEnv, startRelay } from "./gui.ts";
 import { logView } from "./log-view.ts";
 import { Store, type Manifest } from "./store.ts";
@@ -19,8 +21,7 @@ const params = new URLSearchParams(location.search);
 const url = params.get("url") ?? "https://example.com/";
 const relays = params.getAll("wisp").length ? params.getAll("wisp") : DEFAULT_RELAYS;
 const memoryMiB = MEMORY_SIZES.find((m) => m === Number(params.get("mem"))) ?? 2048;
-// The page switches mobile mode later with a { type: "mobile", on } message (see main()).
-let mobile = params.get("mobile") === "1";
+const mobile = params.get("mobile") === "1";
 // unkernel falls back to one CPU where it can't start more (it logs why).
 const cpus = Math.max(1, Math.min(4, Math.floor(Number(params.get("cpus"))) || 1));
 
@@ -196,12 +197,12 @@ async function main() {
   const flags = params.has("flags") ? flagLines(params.get("flags")!) : browser.flags.defaults;
   const bad = flags.map((f) => flagError(browser.flags.kind, f)).find(Boolean);
   if (bad) throw new Error(`flags: ${bad}`);
-  const launchFor = (phone: boolean) => browser.launch(url, paths, { mobile: phone, flags });
+  const launchFor = (at: string, phone: boolean) => browser.launch(at, paths, { mobile: phone, flags });
 
   // The running browser; it is cleared first when we stop it, so its exit isn't reported.
   let current: Unkernel.Pty | undefined;
-  async function start() {
-    const launch = launchFor(mobile);
+  async function start(at: string, phone: boolean) {
+    const launch = launchFor(at, phone);
     const env = {
       PATH: "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
       HOME: "/root",
@@ -238,37 +239,64 @@ kill -s KILL -- -${proc.pid}`]);
   // Only the connection matters: busybox wget can't check TLS certificates, so https fails after it.
   await vm.exec("/bin/sh", ["-c", 'wget -q -O /dev/null -T 20 "$1"', "sh", url]).catch(() => {});
 
+  // What the browser shows: its URL, and whether it sends the mobile user agent. A browser with
+  // remote control starts with its own user agent and switches through it, so it can switch back;
+  // in mobile mode it opens the page only after switching.
+  let now = { url: browser.remote && mobile ? "about:blank" : url, mobile: browser.remote ? false : mobile };
   progress(20);
   step(`Starting ${browser.label}; packages download as it opens them`);
-  await start();
+  await start(now.url, now.mobile);
+  let control: Promise<Control | null> = browser.remote
+    ? connectControl(vm, browser, 300_000, guest).then(
+        (c) => (guest(`Remote control ready (${browser.remote?.protocol === "cdp" ? "DevTools protocol" : "WebDriver BiDi"})`), c),
+        (err) => (guest(`No remote control: ${err?.message ?? err}`), null),
+      )
+    : Promise.resolve(null);
 
-  // Mobile mode without a reboot: the window resizes at once; a browser that also sends a mobile
-  // user agent restarts, since it reads that only at startup. Switches queue behind each other.
-  let switching = Promise.resolve();
-  switchMobile = (on) => {
-    switching = switching.then(async () => {
-      if (on === mobile) return;
-      const restart = JSON.stringify(launchFor(on)) !== JSON.stringify(launchFor(mobile));
-      mobile = on;
-      desktop.classList.toggle("phone", on);
-      if (!restart || !current) return;
+  // Bring the browser to what the page wants: through its remote control, or else by restarting
+  // it (the VM keeps running), and only if its launch command changes. The window resizes at once.
+  async function apply() {
+    const want = { url: wantUrl, mobile: wantMobile };
+    desktop.classList.toggle("phone", want.mobile);
+    if (want.url === now.url && want.mobile === now.mobile) return;
+    const remote = await control;
+    if (remote) {
+      try {
+        if (want.mobile !== now.mobile) await remote.setMobile(want.mobile, want.url === now.url);
+        if (want.url !== now.url) await remote.navigate(want.url);
+        now = want;
+        return;
+      } catch (err) {
+        guest(`${browser.label}'s remote control failed (${(err as Error)?.message ?? err}); restarting it instead`);
+        control = Promise.resolve(null);
+      }
+    }
+    if (JSON.stringify(launchFor(want.url, want.mobile)) !== JSON.stringify(launchFor(now.url, now.mobile))) {
       bootEl.hidden = false;
-      step(`Restarting ${browser.label} with a ${on ? "mobile" : "desktop"} user agent`);
+      step(`Restarting ${browser.label}`);
       await stop();
-      await start();
-    }).catch((err) => fail(String(err?.message ?? err)));
-  };
-  if (wantMobile !== mobile) switchMobile(wantMobile);
+      await start(want.url, want.mobile);
+    }
+    now = want;
+  }
+  // Changes queue behind each other; each applies the latest wishes.
+  let applying = Promise.resolve();
+  changed = () => (applying = applying.then(apply).catch((err) => fail(String(err?.message ?? err))));
+  changed();
 }
 
-// The page's mobile switch: listened for from the start, applied once the browser runs.
+// What the page wants shown: listened for from the start, applied once the browser runs.
+let wantUrl = url;
 let wantMobile = mobile;
-let switchMobile: ((on: boolean) => void) | undefined;
+let changed: (() => void) | undefined;
 addEventListener("message", ({ source, origin, data }) => {
-  const message = parseMobile(data);
-  if (source !== parent || origin !== location.origin || !message) return;
-  wantMobile = message.on;
-  switchMobile?.(message.on);
+  if (source !== parent || origin !== location.origin) return;
+  const toMobile = parseMobile(data);
+  const toUrl = parseNavigate(data);
+  if (toMobile) wantMobile = toMobile.on;
+  else if (toUrl) wantUrl = toUrl.url;
+  else return;
+  changed?.();
 });
 
 main().catch((err) => fail(String(err?.message ?? err)));

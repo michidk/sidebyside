@@ -24,10 +24,13 @@ The toolbar does the rest:
 
 - **Browsers** adds Firefox ESR and NetSurf (its own engine) and sets the order of the panes.
 - **Mobile** switches the browsers to a phone-sized window and, except NetSurf, a mobile user
-  agent, without rebooting the VMs.
+  agent, without rebooting the VMs. Firefox and Chromium switch while they run; Epiphany restarts.
 - **Settings** sets the memory per VM, shows each pane's CPU, memory and network use, picks the
   internet relay, and edits each browser's command-line flags.
 - **Console** collects the web-console messages of Firefox, Firefox ESR and Chromium in one list.
+
+Open a new URL and the running browsers go there: Firefox and Chromium navigate, Epiphany and
+NetSurf restart, and no VM reboots. Changed settings, or Open on the same URL, start the VMs over.
 
 The link keeps everything, so you can share a comparison:
 `?url=https://example.com/&browsers=netsurf,firefox&mobile=1`.
@@ -54,6 +57,10 @@ The link keeps everything, so you can share a comparison:
   public [Wisp](https://github.com/MercuryWorkshop/wisp-protocol) relay
   (`wisp.mercurywork.shop`, `anura.pro`). Those relays see which hosts the VMs connect to. Use your
   own with `?wisp=wss://your-relay/`.
+- **Remote control:** the page drives Chromium over the DevTools protocol and Firefox over
+  WebDriver BiDi, each listening on the guest's `127.0.0.1:9222` and reached through unkernel's
+  `vm.connect()` (`src/vm/control.ts`). Websites in Firefox see `navigator.webdriver` as `true`, and
+  its address bar shows the remote-control stripes.
 - **Isolation:** the VMs need `SharedArrayBuffer`, so the pages load `coi-serviceworker`, which
   adds COOP/COEP on hosts that can't send headers.
 

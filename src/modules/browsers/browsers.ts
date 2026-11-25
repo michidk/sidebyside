@@ -72,6 +72,10 @@ export interface Browser {
   // sooner and saves memory in the VM.
   flags: { kind: FlagKind; defaults: string[] };
   launch(url: string, store: Record<string, string>, opts: LaunchOptions): Launch;
+  // How the VM page controls the running browser (navigate, switch its user agent) through a
+  // server it runs on the guest's 127.0.0.1:REMOTE_PORT: the DevTools protocol or WebDriver BiDi.
+  // Absent: the browser restarts for a new URL or user agent.
+  remote?: { protocol: "cdp" | "bidi"; mobileUA: string };
   // A web-console message, if this line of the browser's output is one. Absent: the browser
   // can't print its console (Epiphany).
   console?(line: string): ConsoleMessage | null;
@@ -85,6 +89,8 @@ export const DEFAULT_RELAYS = ["wss://wisp.mercurywork.shop/", "wss://anura.pro/
 export const COMMON_PACKAGES = ["dejavu_fonts", "cacert"];
 
 // The phone each engine would really run on.
+export const REMOTE_PORT = 9222;
+
 const MOBILE_UA = {
   firefox: "Mozilla/5.0 (Android 15; Mobile; rv:160.0) Gecko/160.0 Firefox/160.0",
   chromium: "Mozilla/5.0 (Linux; Android 15; Pixel 9) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/158.0.0.0 Mobile Safari/537.36",
@@ -147,9 +153,10 @@ function gecko(id: string, label: string, attr: string, binary: string, byDefaul
         "browser.cache.disk.enable=false",
       ],
     },
+    remote: { protocol: "bidi", mobileUA: MOBILE_UA.firefox },
     launch: (url, s, { mobile, flags }) => ({
       program: `${s[attr]}/bin/${binary}`,
-      args: ["--new-instance", "--profile", "/root/firefox", url],
+      args: ["--new-instance", "--profile", "/root/firefox", "--remote-debugging-port", String(REMOTE_PORT), url],
       // No GTK accessibility bridge (it waits on a D-Bus service the VM doesn't have), no crash reporter.
       env: { NO_AT_BRIDGE: "1", MOZ_CRASHREPORTER_DISABLE: "1" },
       // Every VM is a first run: skip the privacy-notice tab and the welcome page. Firefox also
@@ -166,6 +173,7 @@ user_pref("browser.startup.homepage_override.mstone", "ignore");
 user_pref("browser.aboutwelcome.enabled", false);
 user_pref("devtools.console.stdout.content", true);
 user_pref("security.data_uri.block_toplevel_data_uri_navigations", false);
+user_pref("remote.prefs.recommended", false);
 ${userPrefs(flags).join("\n")}
 ${mobile ? `user_pref("general.useragent.override", "${MOBILE_UA.firefox}");` : ""}
 EOF`,
@@ -210,6 +218,7 @@ export const BROWSERS: Browser[] = [
         "--disable-features=Translate,OptimizationHints,MediaRouter,AutofillServerCommunication,IsolateOrigins,site-per-process",
       ],
     },
+    remote: { protocol: "cdp", mobileUA: MOBILE_UA.chromium },
     launch: (url, s, { mobile, flags }) => ({
       program: `${s.chromium}/bin/chromium`,
       // No sandbox or zygote: the guest has no user namespaces for them. No GPU: the VM has none.
@@ -218,6 +227,7 @@ export const BROWSERS: Browser[] = [
       args: [
         "--no-sandbox", "--no-zygote", "--disable-gpu", "--ozone-platform=wayland", "--no-first-run", "--test-type",
         "--enable-logging=stderr", "--log-level=0",
+        `--remote-debugging-port=${REMOTE_PORT}`, "--user-data-dir=/root/chromium",
         ...flags,
         ...(mobile ? [`--user-agent=${MOBILE_UA.chromium}`] : []),
         url,

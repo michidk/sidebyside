@@ -29,6 +29,12 @@ export interface MobileMessage {
   on: boolean;
 }
 
+// Page → frame: open this URL in the running browser.
+export interface NavigateMessage {
+  type: "navigate";
+  url: string;
+}
+
 const LEVELS: ConsoleLevel[] = ["log", "info", "warn", "error", "debug"];
 const known = (id: unknown) => BROWSERS.some((b) => b.id === id);
 
@@ -49,4 +55,9 @@ export function parseUsage(data: unknown): UsageMessage | undefined {
 export function parseMobile(data: unknown): MobileMessage | undefined {
   const d = data as Partial<MobileMessage> | null;
   return d?.type === "mobile" ? { type: "mobile", on: d.on === true } : undefined;
+}
+
+export function parseNavigate(data: unknown): NavigateMessage | undefined {
+  const d = data as Partial<NavigateMessage> | null;
+  return d?.type === "navigate" && typeof d.url === "string" && URL.canParse(d.url) ? { type: "navigate", url: d.url } : undefined;
 }
