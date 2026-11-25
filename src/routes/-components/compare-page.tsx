@@ -1,7 +1,7 @@
 import { getRouteApi } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
@@ -135,6 +135,9 @@ export function ComparePage() {
           {consoleLog.unseen > 0 && <Badge variant="destructive">{consoleLog.unseen}</Badge>}
         </Button>
         <Button type="submit">Open</Button>
+        <a href="https://github.com/michidk/sidebyside" target="_blank" rel="noopener" className={buttonVariants({ variant: "ghost" })}>
+          GitHub
+        </a>
       </form>
 
       <main className="grid min-h-0 flex-1 grid-cols-[repeat(auto-fit,minmax(360px,1fr))]">
