@@ -13,6 +13,8 @@ import { defineConfig } from "vite";
 const frameVersion = createHash("sha256").update(readFileSync("public/vm.html")).digest("hex").slice(0, 12);
 
 export default defineConfig({
+  // GitHub Pages serves the site from /<repo>/; see .github/workflows/pages.yml.
+  base: process.env.BASE_PATH ?? "/",
   resolve: { tsconfigPaths: true },
   define: { __FRAME_VERSION__: JSON.stringify(frameVersion) },
   plugins: [

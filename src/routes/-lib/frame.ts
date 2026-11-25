@@ -31,5 +31,5 @@ export function frameSrc(b: Browser, run: Run, opts: { mobile: boolean; panes: n
   if (opts.mobile) params.set("mobile", "1");
   for (const relay of run.relays) params.append("wisp", relay);
   params.set("v", __FRAME_VERSION__);
-  return `/vm.html?${params}`;
+  return `${import.meta.env.BASE_URL}vm.html?${params}`;
 }

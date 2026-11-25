@@ -14,7 +14,7 @@ export const Route = createRootRoute({
     links: [{ rel: "stylesheet", href: appCss }],
     // Static hosts can't send COOP/COEP, which the VMs need for SharedArrayBuffer; this service
     // worker adds them (and reloads once). coepCredentialless off for Safari.
-    scripts: [{ children: "window.coi = { coepCredentialless: () => false };" }, { src: "/coi-serviceworker.js" }],
+    scripts: [{ children: "window.coi = { coepCredentialless: () => false };" }, { src: `${import.meta.env.BASE_URL}coi-serviceworker.js` }],
   }),
   shellComponent: RootDocument,
 });

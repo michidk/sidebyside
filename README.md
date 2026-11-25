@@ -57,7 +57,11 @@ bun test
 ```
 
 Serve `dist/client/` from any static host (GitHub Pages, Cloudflare Pages, Netlify, `python3 -m
-http.server -d dist/client`). It must be HTTPS, or localhost, for the service worker.
+http.server -d dist/client`). It must be HTTPS, or localhost, for the service worker. To serve it
+from a subpath, build with `BASE_PATH=/subpath/ bun run build`.
+
+Live at <https://michidk.github.io/sidebyside/>: `.github/workflows/pages.yml` deploys every push to
+`main`.
 
 The page is a [TanStack Start](https://tanstack.com/start) app built as a static SPA (only its shell
 is prerendered; no server code), with [shadcn/ui](https://ui.shadcn.com) components on
