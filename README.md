@@ -1,26 +1,52 @@
 # Side by Side
 
-Type a URL and see it in Firefox (Gecko), Chromium (Blink) and Epiphany (WebKit) side by side. Each
-browser runs in its own Linux VM inside the page. The site is static: no server code.
+Open one URL in several real desktop browsers at once and compare how each engine renders it. Every
+browser runs in its own Linux VM inside your tab, so there is nothing to install and no server
+behind the page.
 
-The Browsers menu adds Firefox ESR and NetSurf (its own engine) and sets the order of the panes;
-the link keeps both (`&browsers=netsurf,firefox`).
+**[Open Side by Side](https://michidk.github.io/sidebyside/)** · [Use it](#use-it) ·
+[How it works](#how-it-works) · [Build and deploy](#build-and-deploy)
+
+[![Pages deployment](https://github.com/michidk/sidebyside/actions/workflows/pages.yml/badge.svg)](https://github.com/michidk/sidebyside/actions/workflows/pages.yml)
+[![License: MIT or Apache-2.0](https://img.shields.io/badge/license-MIT%20or%20Apache--2.0-blue)](#license)
+
+![example.com open in Firefox, Chromium and Epiphany, one pane each, under the URL bar with the Browsers, Mobile, Settings and Console controls](docs/assets/screenshot.webp)
+
+## Use it
+
+1. Open <https://michidk.github.io/sidebyside/> on a desktop computer with 8 GiB of RAM or more.
+2. Type a URL and press **Open**. Firefox (Gecko), Chromium (Blink) and Epiphany (WebKit) each boot
+   in their own pane and load it. The first visit takes 1 to 3 minutes while the browsers download;
+   later visits reuse the cache.
+3. Compare the panes. Each pane is the real browser: click, scroll and type in it as usual.
+
+The toolbar does the rest:
+
+- **Browsers** adds Firefox ESR and NetSurf (its own engine) and sets the order of the panes.
+- **Mobile** switches the browsers to a phone-sized window and, except NetSurf, a mobile user
+  agent, without rebooting the VMs.
+- **Settings** sets the memory per VM, shows each pane's CPU, memory and network use, picks the
+  internet relay, and edits each browser's command-line flags.
+- **Console** collects the web-console messages of Firefox, Firefox ESR and Chromium in one list.
+
+The link keeps everything, so you can share a comparison:
+`?url=https://example.com/&browsers=netsurf,firefox&mobile=1`.
 
 ## How it works
 
 - **VM:** [unkernel](https://github.com/pithings/unkernel), a Linux kernel compiled to WebAssembly
   that runs aarch64 programs, one per browser in its own iframe (`vm.html`). Each VM gets an even share of your CPU threads (at most 4, 2 in Firefox).
-- **Browsers:** the real nixpkgs builds, served to the guest at `/nix/store` by `src/store.ts`.
+- **Browsers:** the real nixpkgs builds, served to the guest at `/nix/store` by `src/vm/store.ts`.
   Store paths download from cache.nixos.org (which allows cross-origin reads) only when the guest
   first reads a file in them, and each NAR is checked against the NarHash in
   `public/closures/*.json`.
   `scripts/closures.ts` writes those manifests at build time from narinfos whose signatures it
   checks against cache.nixos.org's key.
-- **Cache:** downloads go into the page's Cache Storage (`src/fetch-nar.ts`), shared by all the
+- **Cache:** downloads go into the page's Cache Storage (`src/vm/fetch-nar.ts`), shared by all the
   VMs: they have most libraries in common, so each is downloaded once, and a second visit
   downloads nothing it already has.
 - **Flags:** each browser starts with flags that turn off what testing a page doesn't need
-  (updates, telemetry, sync, safe browsing, extra processes). They're in `src/browsers.ts` and
+  (updates, telemetry, sync, safe browsing, extra processes). They're in `src/modules/browsers/browsers.ts` and
   editable under Settings → Browser flags; edited flags are saved in the link.
 - **Windows:** [wland](https://github.com/pithings/wland) composites the guest's Wayland windows in
   the page; its relay runs in the guest and talks to the page over vsock.
@@ -69,7 +95,7 @@ is prerendered; no server code), with [shadcn/ui](https://ui.shadcn.com) compone
 plain TypeScript bundled by Bun: its main thread already runs the compositor.
 
 | Path | What it does |
-|---|---|
+| --- | --- |
 | `src/routes/index.tsx`, `src/routes/-components/` | The page: URL, browser menu, settings, console, one pane per browser |
 | `src/routes/-lib/`, `src/routes/-hooks/` | The page's link state, settings checks, frame URLs, and frame messages |
 | `src/components/ui/` | shadcn components (`meter.tsx` is Base UI's Meter in the same style) |

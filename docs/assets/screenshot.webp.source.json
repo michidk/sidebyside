@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "tool": "readme-skill/0.1.0",
+  "inputHash": "98b5703be4cab5da2aa0be0805ab01ed2bf1b1a8a85a2c16eac7bd46c9623e04",
+  "outputHash": "fb0bb5cf6eaf84634ef89bfb7c1e3e01b04bae7b8eb9f921b05b86f494e46cc6",
+  "specification": {
+    "operation": "media",
+    "format": ".webp",
+    "width": 1280,
+    "quality": 85,
+    "play": false,
+    "crop": null,
+    "variant": "local",
+    "sharp": "0.35.5"
+  },
+  "source": "screenshot.png"
+}
