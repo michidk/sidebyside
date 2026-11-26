@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { BROWSERS, type Browser } from "@/modules/browsers/browsers";
 import type { MobileMessage, NavigateMessage } from "@/modules/vm-frame/messages";
+import { forgetAllSavedVms } from "@/modules/vm-frame/saved-vms";
 import { useConsoleLog } from "../-hooks/use-console-log";
 import { useUsage } from "../-hooks/use-usage";
 import { frameSrc, type Run } from "../-lib/frame";
@@ -99,6 +100,13 @@ export function ComparePage() {
     for (const frame of frames.current.values()) tellMobile(frame, on);
   }
 
+  // Forget the saved VMs, so every browser boots fresh, and start the panes over now.
+  async function reset() {
+    await forgetAllSavedVms();
+    setRun((old) => old && { ...old, id: old.id + 1 });
+    setPanes({});
+  }
+
   const setShown = (next: Browser[]) => update({ browsers: browsersParam(next) });
   const paneBrowsers = run ? BROWSERS.filter((b) => panes[b.id]) : [];
 
@@ -140,6 +148,14 @@ export function ComparePage() {
         >
           Console
           {consoleLog.unseen > 0 && <Badge variant="destructive">{consoleLog.unseen}</Badge>}
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          title="Forget the saved VMs and boot every browser from scratch"
+          onClick={reset}
+        >
+          Reset
         </Button>
         <Button type="submit">Open</Button>
         <a href="https://github.com/michidk/sidebyside" target="_blank" rel="noopener" className={buttonVariants({ variant: "ghost" })}>

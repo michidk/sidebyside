@@ -28,9 +28,10 @@ export async function startRelay(vm: Vm, relay: Uint8Array) {
   if (put.exitCode !== 0) throw new Error(`could not install the relay: ${put.stderr}`);
   const started = await sh(vm, [
     `mkdir -p -m 700 ${RUNTIME_DIR}`,
-    // --link-on-demand: dial the page when the first app connects, not now.
-    `XDG_RUNTIME_DIR=${RUNTIME_DIR} setsid ${RELAY} --link vsock:${HOST_CID}:${WAYLAND_PORT} --buffers kwshm` +
-      ` --display ${DISPLAY} --xwayland off --link-on-demand < /dev/null > ${RELAY_LOG} 2>&1 &`,
+    // --profile session: the compositor runs in the relay and the page only views it, so the
+    // browser keeps its window when the link drops, as when a saved VM resumes (it dials again).
+    `XDG_RUNTIME_DIR=${RUNTIME_DIR} setsid ${RELAY} --link vsock:${HOST_CID}:${WAYLAND_PORT} --buffers copy` +
+      ` --display ${DISPLAY} --xwayland off --profile session < /dev/null > ${RELAY_LOG} 2>&1 &`,
     // Up to 10 s for the socket; the relay's log if it died instead.
     `for i in $(seq 100); do [ -S ${RUNTIME_DIR}/${DISPLAY} ] && exit 0; sleep 0.1; done; cat ${RELAY_LOG} >&2; exit 1`,
   ].join("\n"));

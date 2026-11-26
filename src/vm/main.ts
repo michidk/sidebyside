@@ -6,6 +6,7 @@
 import type * as Unkernel from "unkernel";
 import { BROWSERS, DEFAULT_RELAYS, flagError, flagLines, type Browser } from "../modules/browsers/browsers.ts";
 import { parseMobile, parseNavigate, type ConsoleMessage, type UsageMessage } from "../modules/vm-frame/messages.ts";
+import { forgetSavedVm, loadSavedVm, saveVm, type SavedVmMeta } from "../modules/vm-frame/saved-vms.ts";
 import { connectControl, type Control } from "./control.ts";
 import { attachDesktop, sessionEnv, startRelay } from "./gui.ts";
 import { logView } from "./log-view.ts";
@@ -147,7 +148,7 @@ async function main() {
   const manifest: Promise<Manifest> = fetch(`closures/${browser.id}.json`).then((r) => r.json());
   const relay = fetch("vendor/wlandr").then(async (r) => new Uint8Array(await r.arrayBuffer()));
 
-  const { checkSupport, createKernel } = await unkernel;
+  const { checkSupport, createKernel, decodeSnapshot, encodeSnapshot } = await unkernel;
   const support = await checkSupport();
   if (!support.ok) throw new Error(`this browser can't run the VM: ${support.problems.join("; ")}`);
 
@@ -164,39 +165,80 @@ async function main() {
   // The browser's own paths download while Linux boots.
   for (const root of roots) store.prefetch(root, true);
 
-  step(`Booting Linux on ${cpus} CPU${cpus > 1 ? "s" : ""}`);
-  const vm = await createKernel({
-    worker: true,
-    memoryMiB,
-    cpus,
-    shm: true,
-    net: { kind: "net", backend: { kind: "wisp", servers: relays } },
-    log: guest,
-  });
-  vm.exited.then(({ kind, reason }) => fail(`The VM stopped: ${kind}${reason ? ` (${reason})` : ""}`));
-  progress(10);
-
-  step("Mounting /nix/store from cache.nixos.org");
-  await run(vm, "mkdir -p /nix/store", "mkdir /nix/store");
-  // requestTimeout 0: a lookup waits as long as its download does.
-  await vm.mount("/nix/store", store, { readOnly: true, requestTimeout: 0 });
-
-  const desktop = document.getElementById("desktop")!;
-  desktop.classList.toggle("phone", mobile);
-  attachDesktop(vm, desktop, () => {
-    progress(100);
-    step(`${browser.label} is up`);
-    setTimeout(() => (bootEl.hidden = !bootEl.classList.contains("error")), 400);
-  }, guest);
-  step("Starting the Wayland relay");
-  await Promise.all([startRelay(vm, await relay), systemFiles(vm, paths)]);
-  progress(15);
-  reportUsage(vm, browser).catch((err) => console.warn(`resource usage: ${err?.message ?? err}`));
-
   // The browser's tuning flags (absent: its defaults); the page checked them, but links are shareable.
   const flags = params.has("flags") ? flagLines(params.get("flags")!) : browser.flags.defaults;
   const bad = flags.map((f) => flagError(browser.flags.kind, f)).find(Boolean);
   if (bad) throw new Error(`flags: ${bad}`);
+
+  // A saved VM resumes only on the same machine: memory, CPUs, flags, and this frame's build.
+  const key = `${browser.id}.${await digest({ memoryMiB, cpus, flags, frame: params.get("v") })}`;
+  // requestTimeout 0: a lookup waits as long as its download does.
+  const storeMount = { fs: store, readOnly: true, requestTimeout: 0 };
+  const machine = {
+    worker: true,
+    memoryMiB,
+    cpus,
+    shm: true,
+    net: { kind: "net" as const, backend: { kind: "wisp" as const, servers: relays } },
+    log: guest,
+  };
+
+  let vm: Vm | undefined;
+  let resumed: { meta: SavedVmMeta; ttys: Unkernel.TtySessionSnapshot[] } | undefined;
+  const saved = await loadSavedVm(key);
+  if (saved) {
+    step("Resuming the saved VM");
+    try {
+      const snapshot = decodeSnapshot(saved.bytes);
+      // A restore that stalls (it has, with several large ones loading at once) boots instead. Not
+      // AbortSignal.timeout(): the VM keeps listening to the signal after it has started.
+      const stalled = new AbortController();
+      const timer = setTimeout(() => stalled.abort(new Error("the restore took over 2 minutes")), 120_000);
+      vm = await createKernel({
+        ...machine,
+        restore: snapshot,
+        transferRestore: true,
+        mounts: { "/nix/store": storeMount },
+        signal: stalled.signal,
+      }).finally(() => clearTimeout(timer));
+      resumed = { meta: saved.meta, ttys: snapshot.ttys ?? [] };
+    } catch (err) {
+      guest(`The saved VM did not resume (${(err as Error)?.message ?? err}); booting instead`);
+      await forgetSavedVm(key);
+    }
+  }
+  if (!vm) {
+    step(`Booting Linux on ${cpus} CPU${cpus > 1 ? "s" : ""}`);
+    vm = await createKernel(machine);
+  }
+  // In closures below: TypeScript forgets that vm was set.
+  const booted: Vm = vm;
+  booted.exited.then(({ kind, reason }) => fail(`The VM stopped: ${kind}${reason ? ` (${reason})` : ""}`));
+  progress(10);
+
+  if (!resumed) {
+    step("Mounting /nix/store from cache.nixos.org");
+    await run(booted, "mkdir -p /nix/store", "mkdir /nix/store");
+    await booted.mount("/nix/store", store, storeMount);
+  }
+
+  const desktop = document.getElementById("desktop")!;
+  desktop.classList.toggle("phone", mobile);
+  let windowShown!: () => void;
+  const firstWindow = new Promise<void>((resolve) => (windowShown = resolve));
+  attachDesktop(booted, desktop, () => {
+    windowShown();
+    progress(100);
+    step(`${browser.label} is up`);
+    setTimeout(() => (bootEl.hidden = !bootEl.classList.contains("error")), 400);
+  }, guest);
+  // A resumed VM's relay is still running in it and dials the page again by itself.
+  if (!resumed) {
+    step("Starting the Wayland relay");
+    await Promise.all([startRelay(booted, await relay), systemFiles(booted, paths)]);
+  }
+  progress(15);
+  reportUsage(booted, browser).catch((err) => console.warn(`resource usage: ${err?.message ?? err}`));
   const launchFor = (at: string, phone: boolean) => browser.launch(at, paths, { mobile: phone, flags });
 
   // The running browser; it is cleared first when we stop it, so its exit isn't reported.
@@ -213,8 +255,11 @@ async function main() {
       ...sessionEnv,
       ...launch.env,
     };
-    if (launch.setup) await run(vm, launch.setup, "browser setup", { env });
-    const proc = await vm.spawn(launch.program, launch.args, { env, cols: 160, rows: 50 });
+    if (launch.setup) await run(booted, launch.setup, "browser setup", { env });
+    // Detachable: the session survives in a saved VM, and a resumed VM attaches to it again.
+    adopt(await booted.spawn(launch.program, launch.args, { env, cols: 160, rows: 50, detachable: true }));
+  }
+  function adopt(proc: Unkernel.Pty) {
     current = proc;
     // The guest program stalls if nobody reads its output.
     proc.output.pipeTo(guestOutput(browser));
@@ -227,7 +272,7 @@ async function main() {
   async function stop() {
     const proc = current!;
     current = undefined;
-    await vm.exec("/bin/sh", ["-c", `kill -s TERM -- -${proc.pid}
+    await booted.exec("/bin/sh", ["-c", `kill -s TERM -- -${proc.pid}
 for i in 1 2 3 4 5 6 7 8 9 10; do kill -s 0 -- -${proc.pid} 2>/dev/null || exit 0; sleep 1; done
 kill -s KILL -- -${proc.pid}`]);
     await proc.ended.catch(() => {});
@@ -237,17 +282,27 @@ kill -s KILL -- -${proc.pid}`]);
   // a browser starting up keeps the VM too busy for that, so connect once first.
   step("Connecting to the internet relay");
   // Only the connection matters: busybox wget can't check TLS certificates, so https fails after it.
-  await vm.exec("/bin/sh", ["-c", 'wget -q -O /dev/null -T 20 "$1"', "sh", url]).catch(() => {});
+  await booted.exec("/bin/sh", ["-c", 'wget -q -O /dev/null -T 20 "$1"', "sh", url]).catch(() => {});
 
   // What the browser shows: its URL, and whether it sends the mobile user agent. A browser with
   // remote control starts with its own user agent and switches through it, so it can switch back;
   // in mobile mode it opens the page only after switching.
-  let now = { url: browser.remote && mobile ? "about:blank" : url, mobile: browser.remote ? false : mobile };
+  // A resumed browser shows what it showed when saved; remote control sessions, and the user
+  // agents they set, ended with the save.
+  let now = resumed
+    ? { url: resumed.meta.url, mobile: browser.remote ? false : resumed.meta.mobile }
+    : { url: browser.remote && mobile ? "about:blank" : url, mobile: browser.remote ? false : mobile };
   progress(20);
-  step(`Starting ${browser.label}; packages download as it opens them`);
-  await start(now.url, now.mobile);
+  if (resumed) {
+    const tty = resumed.ttys[0];
+    if (!tty) throw new Error("the saved VM has no browser session");
+    adopt(await booted.attach(tty, { cols: 160, rows: 50 }));
+  } else {
+    step(`Starting ${browser.label}; packages download as it opens them`);
+    await start(now.url, now.mobile);
+  }
   let control: Promise<Control | null> = browser.remote
-    ? connectControl(vm, browser, 300_000, guest).then(
+    ? connectControl(booted, browser, 300_000, guest).then(
         (c) => (guest(`Remote control ready (${browser.remote?.protocol === "cdp" ? "DevTools protocol" : "WebDriver BiDi"})`), c),
         (err) => (guest(`No remote control: ${err?.message ?? err}`), null),
       )
@@ -279,10 +334,44 @@ kill -s KILL -- -${proc.pid}`]);
     }
     now = want;
   }
+  // Save a freshly booted VM once its browser has settled, so the next visit resumes it. The
+  // kernel waits at a consistent point while the snapshot is written, then runs on. A save fails
+  // while the browser is reading /nix/store; it is tried again a little later.
+  async function save() {
+    await Promise.all([firstWindow, control]);
+    await new Promise((r) => setTimeout(r, 10_000));
+    for (let attempt = 1; ; attempt++) {
+      try {
+        await booted.snapshot({
+          commitTimeoutMs: 300_000,
+          commit: async (snapshot) => {
+            const busy = (snapshot as { hostBusy?: string }).hostBusy;
+            if (busy) throw new Error(busy);
+            await saveVm(key, encodeSnapshot(snapshot) as Uint8Array<ArrayBuffer>, now);
+          },
+          hold: () => "continue",
+        });
+        guest("Saved this VM: the next visit resumes it");
+        return;
+      } catch (err) {
+        await forgetSavedVm(key);
+        if (attempt === 5) return guest(`Could not save this VM: ${(err as Error)?.message ?? err}`);
+        await new Promise((r) => setTimeout(r, 5000));
+      }
+    }
+  }
+
   // Changes queue behind each other; each applies the latest wishes.
   let applying = Promise.resolve();
   changed = () => (applying = applying.then(apply).catch((err) => fail(String(err?.message ?? err))));
   changed();
+  if (!resumed) applying = applying.then(save).catch((err) => guest(`Could not save this VM: ${err?.message ?? err}`));
+}
+
+// A short hash of `value`, for file names.
+async function digest(value: unknown) {
+  const hash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify(value)));
+  return [...new Uint8Array(hash).slice(0, 8)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 // What the page wants shown: listened for from the start, applied once the browser runs.

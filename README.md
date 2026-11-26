@@ -28,6 +28,7 @@ The toolbar does the rest:
 - **Settings** sets the memory per VM, shows each pane's CPU, memory and network use, picks the
   internet relay, and edits each browser's command-line flags.
 - **Console** collects the web-console messages of Firefox, Firefox ESR and Chromium in one list.
+- **Reset** forgets the saved VMs (see below) and boots every browser from scratch.
 
 Open a new URL and the running browsers go there: Firefox and Chromium navigate, Epiphany and
 NetSurf restart, and no VM reboots. Changed settings, or Open on the same URL, start the VMs over.
@@ -57,6 +58,13 @@ The link keeps everything, so you can share a comparison:
   public [Wisp](https://github.com/MercuryWorkshop/wisp-protocol) relay
   (`wisp.mercurywork.shop`, `anura.pro`). Those relays see which hosts the VMs connect to. Use your
   own with `?wisp=wss://your-relay/`.
+- **Saved VMs:** once a browser is up, its VM is saved (memory, processes, the open page) in the
+  site's private storage, and the next visit resumes it instead of booting Linux and starting the
+  browser again. A save is tied to the browser, its flags, the memory and CPU count, and the page's
+  build; anything else boots fresh. It holds what the browser had in memory, such as the cookies of
+  the page it showed; Reset deletes them. unkernel resumes VMs with a host file system only on the
+  page's thread, so `patches/` extends it to its worker mode, and the in-VM Wayland relay runs with
+  `--profile session` so the browser keeps its window across the resume.
 - **Remote control:** the page drives Chromium over the DevTools protocol and Firefox over
   WebDriver BiDi, each listening on the guest's `127.0.0.1:9222` and reached through unkernel's
   `vm.connect()` (`src/vm/control.ts`). Websites in Firefox see `navigator.webdriver` as `true`, and
@@ -118,6 +126,8 @@ plain TypeScript bundled by Bun: its main thread already runs the compositor.
 
 - First load takes 1 to 3 minutes and downloads about 800 MiB for the three default browsers. The VMs run
   emulated, so pages are slow, and Epiphany may show "Page Unresponsive" (click Wait).
+- Saved VMs take about 0.3 to 0.7 GB of the site's storage per browser (Epiphany 333 MB, Chromium
+  513 MB, Firefox 697 MB). A resumed Chromium is up in about 20 s instead of about a minute.
 - The tab needs about 2 GiB of memory per browser shown (6 GiB for the default three).
 - Ladybird and Servo don't run in the VM yet: Ladybird's JavaScript engine reserves more address
   space than the guest has, and Servo loads pages but never draws them with software OpenGL.
